@@ -15,6 +15,10 @@ export default defineConfig({
   trailingSlash: "never",
   experimental: {
     clientPrerender: true,
+    responsiveImages: true,
+  },
+  image: {
+    experimentalLayout: 'responsive',
   },
   integrations: [
     react(),

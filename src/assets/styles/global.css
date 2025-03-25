@@ -82,6 +82,10 @@
     @apply font-dm-sans;
   }
 
+  p:has(img[data-astro-image="responsive"]) {
+    container-type: inline-size;
+  }  
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
