@@ -4,7 +4,15 @@ import Icon from "@ui/icons/Icon.astro";
 import PostFeedback from "@common/PostFeedback.svelte";
 import { formatDate } from "@utils/utils";
 import { getReadingTime } from "@utils/reading-time";
-import { getEntry, render } from "astro:content";
+import { getCollection, getEntry, render } from "astro:content";
+
+export async function getStaticPaths() {
+  const posts = await getCollection("reference");
+  return posts.map(post => ({
+    params: { id: post.id },
+    props: { post },
+  }));
+}
 
 // 1. Get the slug from the incoming server request
 const { id } = Astro.params;

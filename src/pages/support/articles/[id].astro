@@ -1,55 +1,63 @@
-  ---
-  import BaseLayout from "@layout/BaseLayout.astro";
-  import Icon from "@ui/icons/Icon.astro";
-  import PostFeedback from "@common/PostFeedback.svelte";
-  import type { WithContext, Thing } from "schema-dts";
-  import { formatDate } from "@utils/utils";
-  import { getReadingTime } from "@utils/reading-time";
-  import { getEntry, render } from "astro:content";
+---
+import BaseLayout from "@layout/BaseLayout.astro";
+import Icon from "@ui/icons/Icon.astro";
+import PostFeedback from "@common/PostFeedback.svelte";
+import type { WithContext, Thing } from "schema-dts";
+import { formatDate } from "@utils/utils";
+import { getReadingTime } from "@utils/reading-time";
+import { getCollection, getEntry, render } from "astro:content";
 
-  // 1. Get the slug from the incoming server request
-  const { id } = Astro.params;
-  if (id === undefined) {
-    return Astro.redirect("/404");
+export async function getStaticPaths() {
+  const posts = await getCollection("articles");
+  return posts.map(post => ({
+    params: { id: post.id },
+    props: { post },
+  }));
+}
+
+// 1. Get the slug from the incoming server request
+const { id } = Astro.params;
+if (id === undefined) {
+  return Astro.redirect("/404");
+}
+
+// 2. Query for the entry directly using the request slug
+const post = await getEntry("articles", id);
+
+// 3. Redirect if the entry does not exist
+if (post === undefined) {
+  return Astro.redirect("/404");
+}
+
+// 4. Render the entry to HTML in the template
+const { Content, headings } = await render(post);
+
+const validHeadings = headings.filter((heading) => heading.depth === 2);
+const readingTime = getReadingTime(post.body ?? "");
+const slug = id;
+
+// Prepare SEO metadata based on the article content
+const seo = {
+  title: post.data.title,
+  description: post.data.description,
+};
+
+// Schema.org metadata for SEO
+const schema: WithContext<Thing> = {
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "url": Astro.url.href,
+  "name": post.data.title,
+  "description": post.data.description,
+  "datePublished": post.data.date.toLocaleDateString('en-UK'),
+  "isPartOf": {
+    "@type": "WebSite",
+    "url": `${Astro.site}`,
+    "name": "DataNova",
+    "description": "DataNova Analytics Inc. provides advanced analytics for Excel to help businesses unlock actionable insights quickly with no coding required."
   }
-
-  // 2. Query for the entry directly using the request slug
-  const post = await getEntry("articles", id);
-
-  // 3. Redirect if the entry does not exist
-  if (post === undefined) {
-    return Astro.redirect("/404");
-  }
-
-  // 4. Render the entry to HTML in the template
-  const { Content, headings } = await render(post);
-
-  const validHeadings = headings.filter((heading) => heading.depth === 2);
-  const readingTime = getReadingTime(post.body ?? "");
-  const slug = id;
-
-  // Prepare SEO metadata based on the article content
-  const seo = {
-    title: post.data.title,
-    description: post.data.description,
-  };
-
-  // Schema.org metadata for SEO
-  const schema: WithContext<Thing> = {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    "url": Astro.url.href,
-    "name": post.data.title,
-    "description": post.data.description,
-    "datePublished": post.data.date.toLocaleDateString('en-UK'),
-    "isPartOf": {
-      "@type": "WebSite",
-      "url": `${Astro.site}`,
-      "name": "DataNova",
-      "description": "DataNova Analytics Inc. provides advanced analytics for Excel to help businesses unlock actionable insights quickly with no coding required."
-    }
-  };
-  ---
+};
+---
 
 <BaseLayout seo={seo} schema={schema}>
   <section class="mx-auto max-w-[85rem] px-4 py-24 sm:px-6 lg:px-8">
@@ -127,10 +135,14 @@
   </section>
 
   <script>
-    // Initializes the Table of Contents (TOC) by highlighting the active section
-    // as the user scrolls. Uses IntersectionObserver for performance optimization.
     let intersectionObserver: IntersectionObserver | null = null;
-
+    let activeTimeout: number | null = null;
+    const DEBOUNCE_DELAY = 100;
+    let lastActiveId: string | null = null;
+    let sections: HTMLElement[] = [];
+    let scrollDirection: 'up' | 'down' = 'down';
+    let lastScrollY = 0;
+  
     function safeInitTOC() {
       if ("requestIdleCallback" in window) {
         requestIdleCallback(initTOC);
@@ -138,52 +150,99 @@
         setTimeout(initTOC, 200);
       }
     }
-
+  
     function initTOC() {
-      const tocLinks = document.querySelectorAll("[data-toc-link]");
-      const sections = document.querySelectorAll("h2[id]");
-
+      const tocLinks = document.querySelectorAll<HTMLAnchorElement>("[data-toc-link]");
+      sections = Array.from(document.querySelectorAll<HTMLElement>("h2[id]"));
+  
       if (!tocLinks.length || !sections.length) return;
-
-      tocLinks.forEach((link) =>
-        link.classList.remove("text-slate-600", "font-medium"),
-      );
-
+  
+      resetActiveTocLinks(tocLinks);
+      lastScrollY = window.scrollY;
+  
+      // Track scroll direction
+      window.addEventListener('scroll', updateScrollDirection, { passive: true });
+  
       intersectionObserver = new IntersectionObserver(
         (entries) => {
-          let activeSection = null;
-
-          entries.forEach((entry) => {
-            if (entry.target instanceof HTMLElement && entry.isIntersecting) {
-              activeSection = entry.target;
+          if (activeTimeout) clearTimeout(activeTimeout);
+  
+          const intersectingEntry = entries.find(entry => entry.isIntersecting);
+          
+          if (intersectingEntry) {
+            const currentSection = intersectingEntry.target as HTMLElement;
+            let activeId = currentSection.id;
+            
+            // When scrolling up, use the previous section
+            if (scrollDirection === 'up') {
+              const currentIndex = sections.findIndex(s => s.id === activeId);
+              if (currentIndex > 0) {
+                activeId = sections[currentIndex - 1].id;
+                console.log(`Scrolling up - using previous section: ${activeId}`);
+              }
             }
-          });
-
-          if (activeSection) {
-            const sectionId = (activeSection as HTMLElement).getAttribute("id");
-            if (sectionId) {
-              document
-                .querySelector(`[data-toc-link][href="#${sectionId}"]`)
-                ?.classList.add("text-slate-600", "font-medium");
+  
+            activeTimeout = window.setTimeout(() => {
+              if (activeId !== lastActiveId) {
+                resetActiveTocLinks(tocLinks);
+                setActiveLink(activeId, tocLinks);
+                lastActiveId = activeId;
+              }
+            }, DEBOUNCE_DELAY);
+          } else {
+            // Handle non-intersecting states
+            const scrollY = window.scrollY;
+            const firstSection = sections[0];
+            
+            // Before first section
+            if (firstSection && scrollY < firstSection.offsetTop) {
+              console.log('Before first section - clearing active');
+              resetActiveTocLinks(tocLinks);
+              lastActiveId = null;
             }
+            // After last section remains handled by lastActiveId persistence
           }
         },
         {
-          threshold: 0.3,
-          rootMargin: "-20% 0px -55% 0px",
-        },
+          threshold: 0,
+          rootMargin: "-50% 0px -50% 0px" // Only middle line counts
+        }
       );
-
-      sections.forEach((section) => intersectionObserver?.observe(section));
+  
+      sections.forEach(section => intersectionObserver?.observe(section));
     }
-
+  
+    function updateScrollDirection() {
+      const currentScrollY = window.scrollY;
+      scrollDirection = currentScrollY > lastScrollY ? 'down' : 'up';
+      lastScrollY = currentScrollY;
+    }
+  
+    function setActiveLink(sectionId: string, links: NodeListOf<HTMLAnchorElement>) {
+      const activeLink = document.querySelector<HTMLAnchorElement>(
+        `[data-toc-link][href="#${sectionId}"]`
+      );
+      if (activeLink) {
+        activeLink.classList.add("text-slate-600", "font-medium");
+        console.log("Active section:", sectionId);
+      }
+    }
+  
+    function resetActiveTocLinks(links: NodeListOf<HTMLAnchorElement>) {
+      links.forEach(link => {
+        link.classList.remove("text-slate-600", "font-medium");
+      });
+    }
+  
     function cleanup() {
+      if (activeTimeout) clearTimeout(activeTimeout);
       intersectionObserver?.disconnect();
       intersectionObserver = null;
+      lastActiveId = null;
+      window.removeEventListener('scroll', updateScrollDirection);
     }
-
+  
     safeInitTOC();
-
     document.addEventListener("astro:page-load", safeInitTOC);
     document.addEventListener("astro:before-swap", cleanup);
   </script>
