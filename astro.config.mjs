@@ -1,7 +1,6 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import tailwindcss from "@tailwindcss/vite";
-import vercel from "@astrojs/vercel";
 import react from "@astrojs/react";
 import markdoc from "@astrojs/markdoc";
 import keystatic from "@keystatic/astro";
@@ -12,7 +11,7 @@ import svelte from "@astrojs/svelte";
 export default defineConfig({
   // The `site` property specifies the base URL for your site.
   // Be sure to update this to your own domain (e.g., "https://yourdomain.com") before deploying.
-  site: "https://data-nova.vercel.app",
+  site: process.env.SITE_CANONICAL_URL,
   prefetch: true,
   trailingSlash: "never",
   experimental: {
@@ -29,5 +28,4 @@ export default defineConfig({
     plugins: [tailwindcss()],
   },
   output: "server",
-  adapter: vercel(),
 });
