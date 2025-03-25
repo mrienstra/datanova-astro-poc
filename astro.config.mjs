@@ -5,6 +5,8 @@ import react from "@astrojs/react";
 import markdoc from "@astrojs/markdoc";
 import keystatic from "@keystatic/astro";
 
+const isDev = process.env.NODE_ENV === "development"
+
 // https://astro.build/config
 export default defineConfig({
   // The `site` property specifies the base URL for your site
@@ -17,10 +19,10 @@ export default defineConfig({
   integrations: [
     react(),
     markdoc(),
-    ...(process.env.SKIP_KEYSTATIC ? [] : [keystatic()]),
+    ...(isDev ? [keystatic()] : []),
   ],
   vite: {
     plugins: [tailwindcss()],
   },
-  output: "server",
+  output: isDev ? "server" : "static",
 });
